@@ -83,6 +83,90 @@ def build_comparison():
 
 comp_rows, group_sets = build_comparison()
 
+# ── Build combination comparisons ─────────────────────────────────────────────
+# Combinations: choose one option per RNCP track
+def get_combinations():
+    comps = []
+    for track in rncp_data["rncp"]:
+        opts = track["options"]
+        if not comps:
+            for opt in opts:
+                comps.append(set(opt["projects"]))
+        else:
+            new_comps = []
+            for existing in comps:
+                for opt in opts:
+                    new_comps.append(existing | set(opt["projects"]))
+            comps = new_comps
+    return comps
+
+combinations = get_combinations()
+
+# Score combinations by total XP (higher = better)
+combo_xp = []
+for i, proj_set in enumerate(combinations):
+    xp = sum(proj_map.get(pid, {}).get("difficulty", 0) for pid in proj_set)
+    combo_xp.append((i, proj_set, xp))
+
+# Sort by XP descending, get best and 2nd best
+combo_xp.sort(key=lambda x: x[2], reverse=True)
+best_combo = combo_xp[0][1] if len(combo_xp) > 0 else set()
+second_combo = combo_xp[1][1] if len(combo_xp) > 1 else set()
+
+# Build comparison rows for best vs second best
+common_proj = best_combo & second_combo
+unique_to_best = best_combo - second_combo
+unique_to_second = second_combo - best_combo
+
+def fmt_date(d):
+    """Format duration in weeks to 'X w' string."""
+    if not d or d <= 0:
+        return ""
+    w = d / (3600 * 24 * 7)
+    return f"{w:.0f}w"
+
+combo_rows = []
+# Row 1: Common projects
+combo_rows.append({
+    "name": "Commun (dans les 2 combinaisons)",
+    "in_best": "✓",
+    "in_second": "✓",
+    "comment": "+ shared",
+    "total_xp": sum(proj_map.get(pid, {}).get("difficulty", 0) for pid in common_proj),
+    "total_proj": len(common_proj),
+})
+# Rows for projects unique to best combo
+for pid in sorted(unique_to_best, key=lambda p: fmt_xp(proj_map.get(p, {}).get("difficulty", 0)), reverse=True):
+    p = proj_map.get(pid, {})
+    combo_rows.append({
+        "name": p.get("name", "??"),
+        "in_best": "✓",
+        "in_second": "—",
+        "comment": "+ added",
+        "total_xp": p.get("difficulty", 0),
+        "total_proj": 1,
+    })
+# Rows for projects unique to second combo
+for pid in sorted(unique_to_second, key=lambda p: fmt_xp(proj_map.get(p, {}).get("difficulty", 0)), reverse=True):
+    p = proj_map.get(pid, {})
+    combo_rows.append({
+        "name": p.get("name", "??"),
+        "in_best": "—",
+        "in_second": "✓",
+        "comment": "+ added (2nd)",
+        "total_xp": p.get("difficulty", 0),
+        "total_proj": 1,
+    })
+# Total row
+combo_rows.append({
+    "name": "TOTAL",
+    "in_best": "",
+    "in_second": "",
+    "comment": f"{combo_xp[0][2]//1000}k XP • {len(best_combo)} proj • {combo_xp[1][2]//1000}k XP • {len(second_combo)} proj",
+    "total_xp": combo_xp[0][2],
+    "total_proj": len(best_combo) + len(second_combo),
+})
+
 # ── HTML generation ───────────────────────────────────────────────────────────
 CSS = """
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -355,6 +439,30 @@ def generate_html():
         out.append('</tr>')
     out.append('</tbody></table></div>')
     out.append('</section>')
+    
+    # Combination Comparison (Best vs 2nd Best)
+    if combo_rows:
+        out.append('<section>')
+        out.append('<h2><span class="g" style="background:#ff6060"></span> Meilleure vs 2e Combinaison</h2>')
+        out.append('<div style="margin-bottom:6px;font-size:10px;color:#505060">')
+        out.append('✓ = inclut ce projet | — = ne l\'inclut pas')
+        out.append('</div>')
+        out.append('<table style="width:100%;border-collapse:collapse;font-size:11px;border:1px solid #1a1a2e;border-radius:4px;overflow:hidden">')
+        out.append('<thead><tr style="background:#14141f">')
+        out.append('<th style="padding:4px 8px;text-align:left;color:#606080;border-bottom:1px solid #1a1a2e">Projet</th>')
+        out.append('<th style="padding:4px 8px;text-align:center;color:#606080;border-bottom:1px solid #1a1a2e">Meilleure</th>')
+        out.append('<th style="padding:4px 8px;text-align:center;color:#606080;border-bottom:1px solid #1a1a2e">2e Combinaison</th>')
+        out.append('<th style="padding:4px 8px;text-align:center;color:#606080;border-bottom:1px solid #1a1a2e">Commentaire</th>')
+        out.append('</tr></thead><tbody>')
+        for row in combo_rows:
+            out.append(f'<tr style="border-bottom:1px solid #14141f">')
+            out.append(f'<td style="padding:3px 8px;color:#b0b0c0;font-weight:500">{html.escape(row["name"])}</td>')
+            out.append(f'<td style="padding:3px 8px;text-align:center">{row["in_best"]}</td>')
+            out.append(f'<td style="padding:3px 8px;text-align:center">{row["in_second"]}</td>')
+            out.append(f'<td style="padding:3px 8px;text-align:center;color:#8080a0;font-size:10px">{row["comment"]}</td>')
+            out.append('</tr>')
+        out.append('</tbody></table>')
+        out.append('</section>')
     
     # Project lists per track (with tabs)
     for ti, track in enumerate(rncp_data["rncp"]):
